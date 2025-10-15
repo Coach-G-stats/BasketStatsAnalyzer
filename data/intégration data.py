@@ -149,6 +149,65 @@ def get_or_create_player(first_name, last_name):
         print(f"❌ Erreur joueur {first_name} {last_name}: {e}")
         return None
 
+def create_roster_from_boxscore_split(csv_path, team_id, season, team_number):
+    df = pd.read_csv(csv_path)
+    
+    # Trouver l'index des lignes "Total" qui séparent les équipes
+    total_indices = df.index[df['Joueur'] == 'Total'].tolist()
+    if len(total_indices) < 2:
+        print("Erreur: le fichier ne semble pas contenir deux sections équipes bien distinctes")
+        return
+    
+    # Définir les bornes de section selon équipe (1 ou 2)
+    if team_number == 1:
+        df_team = df.loc[:total_indices[0]-1]
+    else:
+        df_team = df.loc[total_indices[0]+1:total_indices[1]-1]
+    
+    for _, row in df_team.iterrows():
+        if 'Nº' not in row or pd.isna(row['Nº']):
+            print(f"Ligne rejetée (pas de numéro): {row.to_dict()}")
+            continue
+        jersey_number = row['Nº']
+        full_name = row['Joueur'] if 'Joueur' in row else None
+        if pd.isna(full_name) or full_name in ['Total', '-', 'player9']:
+            continue
+        first, last = parse_player_name(full_name)
+        if not first:
+            continue
+        player_id = get_or_create_player(first, last)
+        # Vérifier doublon avant insertion
+        ex = supabase.table('roster').select('id').eq('team_id', team_id).eq('player_id', player_id).eq('season', season).execute()
+        if not ex.data:
+            rec = {
+                'team_id': team_id,
+                'player_id': player_id,
+                'jersey_number': int(jersey_number),
+                'season': season
+            }
+            supabase.table('roster').insert(rec).execute()
+            print(f"Insertion {rec}")
+        else:
+            print(f"Déjà dans le roster: {first} {last}")
+
+# Utilisation
+if __name__ == "__main__":
+    team_ids = create_teams()  # ta fonction existante
+    create_roster_from_boxscore_split(
+        r"C:\Users\guill\OneDrive\Documents\GitHub\BasketStatsAnalyzer\feuille_de_match\box_score_stats-aubenas-vs-n3_ommb-18-09-2025.csv",
+        team_ids['USAB'],
+        '2025-2026',
+        1  # équipe 1 dans le csv
+    )
+    create_roster_from_boxscore_split(
+        r"C:\Users\guill\OneDrive\Documents\GitHub\BasketStatsAnalyzer\feuille_de_match\box_score_stats-aubenas-vs-n3_ommb-18-09-2025.csv",
+        team_ids['OMMB'],
+        '2025-2026',
+        2  # équipe 2 dans le csv
+    )
+
+
+
 def insert_game_stats(game_id, stats_df):
     print("Insertion des statistiques joueurs…")
     for _, row in stats_df.iterrows():
