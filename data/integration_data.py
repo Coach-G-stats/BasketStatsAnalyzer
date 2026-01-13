@@ -77,55 +77,44 @@ def convert_minute_str(min_str):
     return None
     
 """Crée les équipes"""
-def create_teams():
-    
+def create_teams(teams):
+    """
+    teams : liste de dicts [{"name": nom_equipe, "city": ""}, ...]
+    Retourne un dict {nom_equipe: id_en_base}
+    """
     print("Gestion des équipes...")
-    
-    teams = [
-        {"name": "USAB", "city": "Aubenas"},
-        {"name": "OMMB", "city": "Saint-Jaen de Védas"}
-    ]
-    
     team_ids = {}
-    
+
     for team in teams:
+        name = team["name"]
+        city = team.get("city", "")
         try:
-            # Vérifier si l'équipe existe
-            result = supabase.table('team').select('id').eq('name', team['name']).execute()
-            
+            # Vérifier si l'équipe existe déjà
+            result = supabase.table('team').select('id').eq('name', name).execute()
             if result.data:
                 team_id = result.data[0]['id']
-                print(f"✅ Équipe {team['name']} existe (ID: {team_id})")
+                print(f"✅ Équipe {name} existe (ID: {team_id})")
             else:
                 # Créer l'équipe
-                result = supabase.table('team').insert(team).execute()
+                result = supabase.table('team').insert({"name": name, "city": city}).execute()
                 team_id = result.data[0]['id']
-                print(f"✅ Équipe {team['name']} créée (ID: {team_id})")
-            
-            team_ids[team['name']] = team_id
-            
+                print(f"✅ Équipe {name} créée (ID: {team_id})")
+
+            team_ids[name] = team_id
+
         except Exception as e:
-            print(f"❌ Erreur équipe {team['name']}: {e}")
-    
+            print(f"❌ Erreur équipe {name}: {e}")
+
     return team_ids
-if __name__ == "__main__":
-    create_teams()
+
     
 print("Création du match...")
     
-def create_game(team_ids):  
-    game_data = {
-        'game_date': '2025-09-13',  # à personnaliser
-        'season': '2025-2026',
-        'phase': 'regular season',
-        'home_roster_id': team_ids.get('USAB'),
-        'away_roster_id': team_ids.get('OMMB'),
-        'home_score': 85,
-        'away_score': 76,
-        'winner': team_ids.get('USAB'),
-        'overtime': False,
-        'location': 'Aubenas Gym'
-    }
+def create_game(game_data):
+    """
+    game_data est déjà construit dans Streamlit (game_date, season, scores, team_ids, etc.)
+    """
+    print("Création du match...")
     try:
         result = supabase.table('game').insert(game_data).execute()
         game_id = result.data[0]['id']
@@ -134,6 +123,8 @@ def create_game(team_ids):
     except Exception as e:
         print(f"❌ Erreur création match: {e}")
         return None
+
+
 
 
 
@@ -149,62 +140,63 @@ def get_or_create_player(first_name, last_name):
         print(f"❌ Erreur joueur {first_name} {last_name}: {e}")
         return None
 
-def create_roster_from_boxscore_split(csv_path, team_id, season, team_number):
-    df = pd.read_csv(csv_path)
-    
+def create_roster_from_boxscore_split(df, team_id, season, team_number):
+    """
+    df : DataFrame déjà lu dans Streamlit (pd.read_csv(uploaded_file))
+    """
     # Trouver l'index des lignes "Total" qui séparent les équipes
     total_indices = df.index[df['Joueur'] == 'Total'].tolist()
     if len(total_indices) < 2:
         print("Erreur: le fichier ne semble pas contenir deux sections équipes bien distinctes")
         return
-    
+
     # Définir les bornes de section selon équipe (1 ou 2)
     if team_number == 1:
-        df_team = df.loc[:total_indices[0]-1]
+        df_team = df.loc[:total_indices[0] - 1]
     else:
-        df_team = df.loc[total_indices[0]+1:total_indices[1]-1]
-    
+        df_team = df.loc[total_indices[0] + 1:total_indices[1] - 1]
+
     for _, row in df_team.iterrows():
         if 'Nº' not in row or pd.isna(row['Nº']):
             print(f"Ligne rejetée (pas de numéro): {row.to_dict()}")
             continue
+
         jersey_number = row['Nº']
         full_name = row['Joueur'] if 'Joueur' in row else None
+
         if pd.isna(full_name) or full_name in ['Total', '-', 'player9']:
             continue
+
         first, last = parse_player_name(full_name)
         if not first:
             continue
+
         player_id = get_or_create_player(first, last)
+
         # Vérifier doublon avant insertion
-        ex = supabase.table('roster').select('id').eq('team_id', team_id).eq('player_id', player_id).eq('season', season).execute()
+        ex = (
+            supabase.table('roster')
+            .select('id')
+            .eq('team_id', team_id)
+            .eq('player_id', player_id)
+            .eq('season', season)
+            .execute()
+        )
+
         if not ex.data:
             rec = {
                 'team_id': team_id,
                 'player_id': player_id,
                 'jersey_number': int(jersey_number),
-                'season': season
+                'season': season,
             }
             supabase.table('roster').insert(rec).execute()
             print(f"Insertion {rec}")
         else:
             print(f"Déjà dans le roster: {first} {last}")
 
-# Utilisation
-if __name__ == "__main__":
-    team_ids = create_teams()  # ta fonction existante
-    create_roster_from_boxscore_split(
-        r"C:\Users\guill\OneDrive\Documents\GitHub\BasketStatsAnalyzer\feuille_de_match\box_score_stats-aubenas-vs-n3_ommb-18-09-2025.csv",
-        team_ids['USAB'],
-        '2025-2026',
-        1  # équipe 1 dans le csv
-    )
-    create_roster_from_boxscore_split(
-        r"C:\Users\guill\OneDrive\Documents\GitHub\BasketStatsAnalyzer\feuille_de_match\box_score_stats-aubenas-vs-n3_ommb-18-09-2025.csv",
-        team_ids['OMMB'],
-        '2025-2026',
-        2  # équipe 2 dans le csv
-    )
+
+
 
 
 
@@ -260,15 +252,3 @@ def insert_game_stats(game_id, stats_df):
             print(f"✅ Stats insérées {first_name} {last_name}")
         except Exception as e:
             print(f"❌ Erreur insertion stats joueur {first_name} {last_name}: {e}")
-
-if __name__ == "__main__":
-    team_ids = create_teams()
-    game_id = create_game(team_ids)
-    if game_id:
-        # Affiche le chemin de ton vrai fichier CSV
-        csv_file = r'C:\Users\guill\OneDrive\Documents\GitHub\BasketStatsAnalyzer\feuille_de_match\box_score_stats-aubenas-vs-n3_ommb-18-09-2025.csv'
-        stats_df = pd.read_csv(csv_file)
-        insert_game_stats(game_id, stats_df)
-        print("✔️ Insertion des stats joueurs terminée")
-    else:
-        print("⚠️ Pas de game_id, insertion stats impossible")

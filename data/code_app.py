@@ -63,4 +63,3 @@ if st.button("Insérer les données") and uploaded_file is not None:
 
     except Exception as e:
         st.error(f"Erreur lors de l'insertion : {e}")
-
